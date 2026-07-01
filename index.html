@@ -1,0 +1,706 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Whisper &amp; the Wanderer</title>
+<style>
+  :root {
+    --bg: #0e1330;
+    --bg2: #1b2350;
+    --ink: #eef1ff;
+    --muted: #a9b0e0;
+    --fairy: #7ef9ff;
+    --hero: #ffd27a;
+    --good: #6bff9e;
+    --bad: #ff6b8b;
+    --panel: rgba(12, 16, 46, 0.86);
+    --stroke: rgba(126, 249, 255, 0.35);
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: radial-gradient(1200px 600px at 50% -10%, var(--bg2), var(--bg) 70%);
+    color: var(--ink);
+    font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+  }
+  .wrap {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 20px 16px 40px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+  }
+  h1 {
+    margin: 6px 0 0;
+    font-size: 26px;
+    letter-spacing: 0.5px;
+  }
+  h1 .spark { color: var(--fairy); }
+  .tagline {
+    margin: 0;
+    color: var(--muted);
+    font-size: 14px;
+    text-align: center;
+    max-width: 640px;
+  }
+  .hud {
+    width: 100%;
+    max-width: 820px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    font-size: 14px;
+  }
+  .hud .stat { display: flex; align-items: center; gap: 6px; }
+  .hud b { color: var(--fairy); }
+  .stage {
+    position: relative;
+    width: 100%;
+    max-width: 820px;
+  }
+  canvas {
+    width: 100%;
+    height: auto;
+    display: block;
+    border: 1px solid var(--stroke);
+    border-radius: 14px;
+    background: linear-gradient(180deg, #10163b 0%, #0b0f2c 100%);
+    box-shadow: 0 20px 60px rgba(0,0,0,0.45);
+  }
+  .overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    pointer-events: none;
+  }
+  .card {
+    pointer-events: auto;
+    background: var(--panel);
+    border: 1px solid var(--stroke);
+    border-radius: 14px;
+    padding: 18px 20px;
+    max-width: 460px;
+    width: 100%;
+    box-shadow: 0 16px 40px rgba(0,0,0,0.5);
+    backdrop-filter: blur(4px);
+  }
+  .card.hidden { display: none; }
+  .card .who {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--fairy);
+    margin-bottom: 6px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+  .card .who .dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: var(--fairy);
+    box-shadow: 0 0 12px var(--fairy);
+  }
+  .card p.say { margin: 0 0 14px; font-size: 15px; line-height: 1.4; }
+  .choices { display: flex; flex-direction: column; gap: 8px; }
+  button.choice {
+    text-align: left;
+    background: rgba(126, 249, 255, 0.08);
+    color: var(--ink);
+    border: 1px solid var(--stroke);
+    border-radius: 10px;
+    padding: 10px 12px;
+    font-size: 14px;
+    cursor: pointer;
+    transition: transform .08s ease, background .12s ease;
+  }
+  button.choice:hover { background: rgba(126, 249, 255, 0.18); transform: translateY(-1px); }
+  button.choice .hint { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .timer {
+    margin-top: 12px;
+    height: 6px;
+    width: 100%;
+    background: rgba(255,255,255,0.08);
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  .timer > span {
+    display: block; height: 100%;
+    background: linear-gradient(90deg, var(--fairy), var(--hero));
+    width: 100%;
+  }
+  .timer-note { margin: 8px 0 0; font-size: 12px; color: var(--muted); }
+  .controls { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+  .btn {
+    background: rgba(126, 249, 255, 0.12);
+    color: var(--ink);
+    border: 1px solid var(--stroke);
+    border-radius: 10px;
+    padding: 8px 16px;
+    font-size: 14px;
+    cursor: pointer;
+  }
+  .btn:hover { background: rgba(126, 249, 255, 0.22); }
+  .btn.primary { background: var(--fairy); color: #04283a; border-color: transparent; font-weight: 600; }
+  .log {
+    width: 100%;
+    max-width: 820px;
+    min-height: 44px;
+    font-size: 13px;
+    color: var(--muted);
+    text-align: center;
+  }
+  .log .flash { color: var(--good); }
+  .log .warn { color: var(--bad); }
+  .legend { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; font-size: 12px; color: var(--muted); }
+  .legend span b { color: var(--ink); }
+  .end-title { margin: 0 0 6px; font-size: 20px; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Whisper <span class="spark">&amp;</span> the Wanderer</h1>
+    <p class="tagline">
+      The <b>Wanderer</b> is played by an AI &mdash; he explores the dream on his own.
+      You are <b>Whisper</b>, a tiny fairy. You cannot move him directly, but at key moments
+      you fly out, time slows, and you can nudge him to do things <i>differently</i>.
+    </p>
+
+    <div class="hud">
+      <div class="stat">Depth <b id="hud-depth">0</b>m</div>
+      <div class="stat">Spirit <b id="hud-health">100</b></div>
+      <div class="stat">Wonder <b id="hud-score">0</b></div>
+      <div class="stat">Nudges <b id="hud-nudges">0</b></div>
+    </div>
+
+    <div class="stage">
+      <canvas id="game" width="820" height="360"></canvas>
+      <div class="overlay">
+        <div id="prompt-card" class="card hidden">
+          <div class="who"><span class="dot"></span> Whisper flutters out</div>
+          <p class="say" id="prompt-text">A choice appears.</p>
+          <div class="choices" id="choices"></div>
+          <div class="timer"><span id="timer-fill"></span></div>
+          <p class="timer-note">If you stay quiet, the Wanderer follows his own instinct&hellip;</p>
+        </div>
+
+        <div id="end-card" class="card hidden">
+          <p class="end-title" id="end-title">The dream fades.</p>
+          <p class="say" id="end-text"></p>
+          <div class="controls">
+            <button class="btn primary" id="restart-btn">Dream again</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="log" id="log">The Wanderer sets off into the dream&hellip;</div>
+
+    <div class="controls">
+      <button class="btn" id="pause-btn">Pause</button>
+      <button class="btn" id="reset-btn">Restart</button>
+    </div>
+
+    <div class="legend">
+      <span><b style="color:var(--hero)">&#9679;</b> Wanderer (AI)</span>
+      <span><b style="color:var(--fairy)">&#10022;</b> Whisper (you)</span>
+      <span><b style="color:var(--good)">&#9670;</b> Wonder</span>
+      <span><b style="color:var(--bad)">&#9650;</b> Danger</span>
+    </div>
+  </div>
+
+<script>
+(function () {
+  "use strict";
+
+  var canvas = document.getElementById("game");
+  var ctx = canvas.getContext("2d");
+  var W = canvas.width, H = canvas.height;
+  var GROUND = H - 70;
+
+  // UI refs
+  var hudDepth = document.getElementById("hud-depth");
+  var hudHealth = document.getElementById("hud-health");
+  var hudScore = document.getElementById("hud-score");
+  var hudNudges = document.getElementById("hud-nudges");
+  var promptCard = document.getElementById("prompt-card");
+  var promptText = document.getElementById("prompt-text");
+  var choicesEl = document.getElementById("choices");
+  var timerFill = document.getElementById("timer-fill");
+  var endCard = document.getElementById("end-card");
+  var endTitle = document.getElementById("end-title");
+  var endText = document.getElementById("end-text");
+  var logEl = document.getElementById("log");
+  var pauseBtn = document.getElementById("pause-btn");
+
+  // ---- Event definitions ----------------------------------------------------
+  // Each event: how the AI acts by default, and the alternatives Whisper offers.
+  var EVENT_TYPES = [
+    {
+      kind: "spikes",
+      prompt: "A field of thorns blocks the path. The Wanderer is about to charge straight through.",
+      aiChoice: 0,
+      options: [
+        { label: "Let him charge through", hint: "His instinct: power ahead", health: -25, score: 6, msg: "He barrels through the thorns, bleeding but proud." },
+        { label: "Nudge him to leap over", hint: "Time it right", health: 0, score: 14, msg: "You flare bright and he vaults the thorns cleanly!" },
+        { label: "Nudge him to find a gap", hint: "Patience over pride", health: -5, score: 10, msg: "He slows, weaves through a hidden gap." }
+      ]
+    },
+    {
+      kind: "fork",
+      prompt: "The path splits. The Wanderer always drifts toward the dark, tempting left tunnel.",
+      aiChoice: 0,
+      options: [
+        { label: "Let him take the dark tunnel", hint: "Risky, glittering", health: -18, score: 20, msg: "The dark tunnel hoards treasure and teeth alike." },
+        { label: "Nudge him toward the bright path", hint: "Safe and calm", health: +12, score: 8, msg: "You lead him to the sunlit path; his spirit mends." },
+        { label: "Nudge him to rest a moment", hint: "Recover, gain little", health: +20, score: 3, msg: "He rests. Wounds close, wonder waits." }
+      ]
+    },
+    {
+      kind: "guardian",
+      prompt: "A sleeping stone guardian blocks the way. The Wanderer reaches for his blade.",
+      aiChoice: 0,
+      options: [
+        { label: "Let him fight it", hint: "His instinct: draw steel", health: -30, score: 12, msg: "A brutal clash. He wins, barely." },
+        { label: "Nudge him to hum a lullaby", hint: "Kindness is clever", health: 0, score: 22, msg: "You whisper a tune; the guardian sleeps on and gifts a gem." },
+        { label: "Nudge him to sneak past", hint: "Quiet feet", health: -6, score: 9, msg: "He tiptoes by, heart pounding." }
+      ]
+    },
+    {
+      kind: "chasm",
+      prompt: "A wide chasm opens ahead. The Wanderer means to sprint and jump blindly.",
+      aiChoice: 0,
+      options: [
+        { label: "Let him blind-jump", hint: "50/50 with fate", health: -20, score: 15, msg: "He leaps on faith and just barely clings to the far edge." },
+        { label: "Nudge him to build a bridge", hint: "Use the dream-vines", health: -2, score: 16, msg: "You point to hanging vines; he weaves a bridge and crosses safe." },
+        { label: "Nudge him to glide with you", hint: "Trust the fairy", health: +4, score: 18, msg: "He grips your glow and you carry him gently across." }
+      ]
+    },
+    {
+      kind: "mirror",
+      prompt: "A mirror-self appears, whispering doubt. The Wanderer is about to argue with it.",
+      aiChoice: 0,
+      options: [
+        { label: "Let him argue", hint: "Stubborn pride", health: -14, score: 5, msg: "He argues for an age and loses himself in it." },
+        { label: "Nudge him to accept the doubt", hint: "Grow through it", health: +6, score: 17, msg: "He nods to his fears; the mirror shatters into wonder." },
+        { label: "Nudge him to walk away", hint: "Not every fight matters", health: 0, score: 11, msg: "He turns his back; the mirror fades quietly." }
+      ]
+    }
+  ];
+
+  // ---- Game state -----------------------------------------------------------
+  var state, hero, fairy, particles, floaters;
+
+  function reset() {
+    state = {
+      running: true,
+      paused: false,
+      mode: "run",          // "run" | "prompt" | "end"
+      depth: 0,
+      health: 100,
+      score: 0,
+      nudges: 0,
+      speed: 2.2,
+      nextEventAt: 60,      // meters until first decision
+      event: null,
+      choiceTimer: 0,
+      choiceTimerMax: 6,    // seconds to decide
+      resolving: 0,         // frames to show result before resuming
+      won: false,
+      goal: 600             // reach this depth to win
+    };
+    hero = { x: 180, y: GROUND, vy: 0, bob: 0, action: "walk", actionT: 0 };
+    fairy = { x: 150, y: GROUND - 40, tx: 150, ty: GROUND - 40, out: false, t: 0 };
+    particles = [];
+    floaters = [];
+    hideCard(promptCard);
+    hideCard(endCard);
+    setLog("The Wanderer sets off into the dream\u2026");
+    syncHud();
+  }
+
+  function hideCard(el) { el.classList.add("hidden"); }
+  function showCard(el) { el.classList.remove("hidden"); }
+
+  function setLog(html, cls) {
+    logEl.innerHTML = cls ? '<span class="' + cls + '">' + html + "</span>" : html;
+  }
+
+  function syncHud() {
+    hudDepth.textContent = Math.floor(state.depth);
+    hudHealth.textContent = Math.max(0, Math.round(state.health));
+    hudScore.textContent = state.score;
+    hudNudges.textContent = state.nudges;
+  }
+
+  function addFloater(text, color) {
+    floaters.push({ x: hero.x, y: hero.y - 60, text: text, color: color, life: 70 });
+  }
+
+  function burst(x, y, color, n) {
+    for (var i = 0; i < n; i++) {
+      var a = Math.random() * Math.PI * 2;
+      var s = 1 + Math.random() * 3;
+      particles.push({ x: x, y: y, vx: Math.cos(a) * s, vy: Math.sin(a) * s - 1, life: 40 + Math.random() * 20, color: color });
+    }
+  }
+
+  // ---- Decision flow --------------------------------------------------------
+  function triggerEvent() {
+    var def = EVENT_TYPES[Math.floor(Math.random() * EVENT_TYPES.length)];
+    state.mode = "prompt";
+    state.event = def;
+    state.choiceTimer = state.choiceTimerMax;
+
+    // Whisper flies out of the hero.
+    fairy.out = true;
+    fairy.tx = hero.x - 40;
+    fairy.ty = hero.y - 90;
+
+    promptText.textContent = def.prompt;
+    choicesEl.innerHTML = "";
+    def.options.forEach(function (opt, idx) {
+      var b = document.createElement("button");
+      b.className = "choice";
+      b.innerHTML = opt.label + '<span class="hint">' + opt.hint + "</span>";
+      b.addEventListener("click", function () { resolveChoice(idx, true); });
+      choicesEl.appendChild(b);
+    });
+    timerFill.style.width = "100%";
+    showCard(promptCard);
+    setLog("Whisper flies out \u2014 time slows. What do you whisper?");
+  }
+
+  function resolveChoice(idx, byPlayer) {
+    var def = state.event;
+    var opt = def.options[idx];
+    hideCard(promptCard);
+
+    if (byPlayer && idx !== def.aiChoice) {
+      state.nudges++;
+      setLog("You nudged him: " + opt.msg, "flash");
+      addFloater("nudged!", "#7ef9ff");
+    } else if (byPlayer) {
+      setLog("You let his instinct lead: " + opt.msg);
+    } else {
+      setLog("You stayed quiet. " + opt.msg);
+    }
+
+    state.health += opt.health;
+    state.score += opt.score;
+    if (state.health > 100) state.health = 100;
+
+    if (opt.health < 0) { burst(hero.x, hero.y - 30, "#ff6b8b", 16); addFloater(opt.health + " spirit", "#ff6b8b"); }
+    else if (opt.health > 0) { burst(hero.x, hero.y - 30, "#6bff9e", 14); addFloater("+" + opt.health + " spirit", "#6bff9e"); }
+    if (opt.score > 0) addFloater("+" + opt.score + " wonder", "#ffd27a");
+
+    // Fairy returns to the hero.
+    fairy.tx = hero.x - 20;
+    fairy.ty = hero.y - 44;
+
+    state.event = null;
+    state.mode = "run";
+    state.resolving = 40;
+    state.nextEventAt = state.depth + 70 + Math.random() * 50;
+    syncHud();
+
+    if (state.health <= 0) endGame(false);
+  }
+
+  function endGame(won) {
+    state.mode = "end";
+    state.running = false;
+    state.won = won;
+    hideCard(promptCard);
+    if (won) {
+      endTitle.textContent = "The Wanderer reaches the heart of the dream!";
+      endText.textContent = "Depth " + Math.floor(state.depth) + "m \u00b7 Wonder " + state.score +
+        " \u00b7 " + state.nudges + " gentle nudges. Together you made it through.";
+    } else {
+      endTitle.textContent = "The Wanderer's spirit gives out.";
+      endText.textContent = "He fades at " + Math.floor(state.depth) + "m with " + state.score +
+        " wonder. Whisper again and guide him better.";
+    }
+    showCard(endCard);
+  }
+
+  // ---- Update ---------------------------------------------------------------
+  function update(dt) {
+    // Fairy easing (always animate so she feels alive).
+    fairy.t += dt;
+    if (state.mode !== "prompt" && state.mode !== "end") {
+      // hover beside the hero
+      fairy.tx = hero.x - 20 + Math.cos(fairy.t * 2) * 6;
+      fairy.ty = hero.y - 44 + Math.sin(fairy.t * 3) * 6;
+      fairy.out = false;
+    }
+    fairy.x += (fairy.tx - fairy.x) * Math.min(1, dt * 6);
+    fairy.y += (fairy.ty - fairy.y) * Math.min(1, dt * 6);
+
+    // Particles + floaters animate regardless of mode.
+    for (var i = particles.length - 1; i >= 0; i--) {
+      var p = particles[i];
+      p.x += p.vx; p.y += p.vy; p.vy += 0.08; p.life -= 1;
+      if (p.life <= 0) particles.splice(i, 1);
+    }
+    for (var j = floaters.length - 1; j >= 0; j--) {
+      var f = floaters[j];
+      f.y -= 0.6; f.life -= 1;
+      if (f.life <= 0) floaters.splice(j, 1);
+    }
+
+    if (state.mode === "prompt") {
+      // Countdown to the AI's own instinct.
+      state.choiceTimer -= dt;
+      var frac = Math.max(0, state.choiceTimer / state.choiceTimerMax);
+      timerFill.style.width = (frac * 100) + "%";
+      if (state.choiceTimer <= 0) resolveChoice(state.event.aiChoice, false);
+      return;
+    }
+
+    if (state.mode !== "run") return;
+
+    // The AI walks the Wanderer forward on his own.
+    hero.bob += dt * 8;
+    hero.y = GROUND + Math.sin(hero.bob) * 2;
+    state.depth += state.speed * dt * 10;
+
+    if (state.resolving > 0) state.resolving -= 1;
+
+    if (state.depth >= state.goal) { endGame(true); return; }
+
+    if (state.depth >= state.nextEventAt && state.resolving <= 0) {
+      triggerEvent();
+    }
+
+    syncHud();
+  }
+
+  // ---- Render ---------------------------------------------------------------
+  function drawBackground() {
+    // parallax dream layers scrolling with depth
+    var scroll = state ? state.depth : 0;
+    ctx.save();
+    for (var layer = 0; layer < 3; layer++) {
+      var speed = 0.2 + layer * 0.35;
+      var off = (scroll * speed) % 120;
+      var alpha = 0.05 + layer * 0.05;
+      ctx.fillStyle = "rgba(126, 249, 255," + alpha + ")";
+      for (var x = -120; x < W + 120; x += 120) {
+        var y = 60 + layer * 70;
+        ctx.beginPath();
+        ctx.arc(x - off, y, 26 + layer * 8, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    ctx.restore();
+
+    // ground
+    ctx.fillStyle = "#0a0e28";
+    ctx.fillRect(0, GROUND + 14, W, H - GROUND);
+    ctx.strokeStyle = "rgba(126,249,255,0.25)";
+    ctx.beginPath();
+    ctx.moveTo(0, GROUND + 14);
+    ctx.lineTo(W, GROUND + 14);
+    ctx.stroke();
+
+    // moving ground ticks
+    var goff = (scroll * 4) % 40;
+    ctx.strokeStyle = "rgba(126,249,255,0.12)";
+    for (var gx = -40; gx < W + 40; gx += 40) {
+      ctx.beginPath();
+      ctx.moveTo(gx - goff, GROUND + 14);
+      ctx.lineTo(gx - goff - 12, H);
+      ctx.stroke();
+    }
+
+    // goal marker when close
+    if (state) {
+      var remaining = state.goal - state.depth;
+      if (remaining < 120 && remaining > 0) {
+        var gxp = W - 60 + (remaining * 2);
+        ctx.fillStyle = "#6bff9e";
+        ctx.fillRect(gxp, GROUND - 60, 4, 74);
+        ctx.beginPath();
+        ctx.moveTo(gxp + 4, GROUND - 60);
+        ctx.lineTo(gxp + 34, GROUND - 50);
+        ctx.lineTo(gxp + 4, GROUND - 40);
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
+  }
+
+  function drawHero() {
+    var x = hero.x, y = hero.y;
+    // shadow
+    ctx.fillStyle = "rgba(0,0,0,0.35)";
+    ctx.beginPath();
+    ctx.ellipse(x, GROUND + 16, 22, 6, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // body
+    ctx.fillStyle = "#ffd27a";
+    ctx.strokeStyle = "#a9772f";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(x - 14, y);
+    ctx.lineTo(x - 14, y - 34);
+    ctx.quadraticCurveTo(x, y - 52, x + 14, y - 34);
+    ctx.lineTo(x + 14, y);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // head
+    ctx.beginPath();
+    ctx.arc(x, y - 46, 11, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    // little legs bob
+    var step = Math.sin(hero.bob) * 5;
+    ctx.strokeStyle = "#a9772f";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(x - 6, y); ctx.lineTo(x - 6 + step, y + 16);
+    ctx.moveTo(x + 6, y); ctx.lineTo(x + 6 - step, y + 16);
+    ctx.stroke();
+  }
+
+  function drawFairy() {
+    var x = fairy.x, y = fairy.y;
+    var glow = 0.5 + 0.5 * Math.sin(fairy.t * 6);
+    // trail
+    ctx.save();
+    ctx.globalAlpha = 0.5;
+    ctx.fillStyle = "#7ef9ff";
+    ctx.beginPath();
+    ctx.arc(x, y, 10 + glow * 6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    // wings
+    ctx.fillStyle = "rgba(255,255,255,0.7)";
+    var wing = Math.sin(fairy.t * 20) * 6;
+    ctx.beginPath(); ctx.ellipse(x - 6, y - 4, 6, 10 + wing * 0.2, -0.6, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(x + 6, y - 4, 6, 10 + wing * 0.2, 0.6, 0, Math.PI * 2); ctx.fill();
+
+    // core
+    ctx.fillStyle = "#eaffff";
+    ctx.beginPath();
+    ctx.arc(x, y, 4, 0, Math.PI * 2);
+    ctx.fill();
+
+    // sparkle trail dots
+    ctx.fillStyle = "rgba(126,249,255,0.5)";
+    for (var i = 1; i <= 4; i++) {
+      ctx.globalAlpha = 0.4 / i;
+      ctx.beginPath();
+      ctx.arc(x - i * 5, y + Math.sin(fairy.t * 6 + i) * 3, 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function drawParticles() {
+    for (var i = 0; i < particles.length; i++) {
+      var p = particles[i];
+      ctx.globalAlpha = Math.max(0, p.life / 60);
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function drawFloaters() {
+    ctx.textAlign = "center";
+    ctx.font = "bold 14px Segoe UI, sans-serif";
+    for (var i = 0; i < floaters.length; i++) {
+      var f = floaters[i];
+      ctx.globalAlpha = Math.max(0, f.life / 70);
+      ctx.fillStyle = f.color;
+      ctx.fillText(f.text, f.x, f.y);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function drawHealthBar() {
+    var w = 120, x = W - w - 16, y = 16;
+    ctx.fillStyle = "rgba(255,255,255,0.1)";
+    ctx.fillRect(x, y, w, 8);
+    var pct = Math.max(0, state.health) / 100;
+    ctx.fillStyle = state.health > 40 ? "#6bff9e" : "#ff6b8b";
+    ctx.fillRect(x, y, w * pct, 8);
+    ctx.fillStyle = "#a9b0e0";
+    ctx.textAlign = "left";
+    ctx.font = "11px Segoe UI, sans-serif";
+    ctx.fillText("spirit", x, y + 22);
+  }
+
+  function render() {
+    ctx.clearRect(0, 0, W, H);
+    drawBackground();
+    if (state) {
+      drawHero();
+      drawFairy();
+      drawParticles();
+      drawFloaters();
+      drawHealthBar();
+
+      if (state.mode === "prompt") {
+        // dim the world to signal "time slows"
+        ctx.fillStyle = "rgba(6, 8, 26, 0.45)";
+        ctx.fillRect(0, 0, W, H);
+        drawFairy(); // fairy stays bright above the dim
+      }
+    }
+  }
+
+  // ---- Loop -----------------------------------------------------------------
+  var last = performance.now();
+  function loop(now) {
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    if (state && state.running && !state.paused) update(dt);
+    else {
+      // keep fairy/particles alive on end screen
+      if (state && !state.paused) update(0); // no-op-ish, keeps HUD stable
+    }
+    render();
+    requestAnimationFrame(loop);
+  }
+
+  // ---- Controls -------------------------------------------------------------
+  document.getElementById("reset-btn").addEventListener("click", reset);
+  document.getElementById("restart-btn").addEventListener("click", reset);
+  pauseBtn.addEventListener("click", function () {
+    if (!state || state.mode === "end") return;
+    state.paused = !state.paused;
+    pauseBtn.textContent = state.paused ? "Resume" : "Pause";
+    setLog(state.paused ? "Paused." : "The dream continues\u2026");
+  });
+
+  // Keyboard: 1/2/3 to whisper a choice quickly.
+  document.addEventListener("keydown", function (e) {
+    if (state && state.mode === "prompt") {
+      var n = parseInt(e.key, 10);
+      if (n >= 1 && n <= state.event.options.length) resolveChoice(n - 1, true);
+    }
+  });
+
+  reset();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
