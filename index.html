@@ -93,6 +93,7 @@
     backdrop-filter: blur(4px);
   }
   .card.hidden { display: none; }
+  .hidden { display: none !important; }
   .card .who {
     display: flex;
     align-items: center;
@@ -183,6 +184,30 @@
     <div class="stage">
       <canvas id="game" width="820" height="360"></canvas>
       <div class="overlay">
+        <div id="start-card" class="card hidden">
+          <div class="who"><span class="dot"></span> <span id="start-kicker">A dream begins</span></div>
+          <p class="end-title" id="start-title">Whisper and the Wanderer</p>
+          <p class="say" id="start-text">
+            Whisper, fairy, to the Wanderer.
+          </p>
+          <div class="controls">
+            <button class="btn primary" id="start-begin">Begin</button>
+            <button class="btn" id="start-intro">Watch intro</button>
+          </div>
+        </div>
+
+        <div id="intro-card" class="card hidden">
+          <div class="who"><span class="dot"></span> <span id="intro-kicker">The dream</span></div>
+          <p class="say" id="intro-text">&hellip;</p>
+          <div class="choices" id="intro-choices"></div>
+          <div class="timer hidden" id="intro-timer"><span id="intro-timer-fill"></span></div>
+          <p class="timer-note hidden" id="intro-timer-note">No harm here. This is only practice.</p>
+          <div class="controls" id="intro-controls">
+            <button class="btn primary" id="intro-next">Continue</button>
+            <button class="btn" id="intro-skip">Skip intro</button>
+          </div>
+        </div>
+
         <div id="prompt-card" class="card hidden">
           <div class="who"><span class="dot"></span> Whisper flutters out</div>
           <p class="say" id="prompt-text">A choice appears.</p>
@@ -240,6 +265,19 @@
   var logEl = document.getElementById("log");
   var pauseBtn = document.getElementById("pause-btn");
 
+  var startCard = document.getElementById("start-card");
+  var startKicker = document.getElementById("start-kicker");
+  var startBeginBtn = document.getElementById("start-begin");
+  var startIntroBtn = document.getElementById("start-intro");
+  var introCard = document.getElementById("intro-card");
+  var introKicker = document.getElementById("intro-kicker");
+  var introText = document.getElementById("intro-text");
+  var introChoices = document.getElementById("intro-choices");
+  var introTimerNote = document.getElementById("intro-timer-note");
+  var introControls = document.getElementById("intro-controls");
+  var introNextBtn = document.getElementById("intro-next");
+  var introSkipBtn = document.getElementById("intro-skip");
+
   // ---- Event definitions ----------------------------------------------------
   // Each event: how the AI acts by default, and the alternatives Whisper offers.
   var EVENT_TYPES = [
@@ -295,14 +333,44 @@
     }
   ];
 
-  // ---- Game state -----------------------------------------------------------
+  // Short label + fuller name shown on the canvas for each obstacle kind.
+  var OBST_LABEL = {
+    spikes: "Thorns ahead",
+    fork: "The path forks",
+    guardian: "Stone guardian",
+    chasm: "A chasm",
+    mirror: "A mirror-self"
+  };
+
+  // ---- Intro / tutorial -----------------------------------------------------
+  // Story cards shown first-time (auto) and any time via "Watch intro".
+  var INTRO = [
+    { kicker: "The dream", text: "This is a dream, and the Wanderer walks it alone. He is played by an AI, driven by his own restless instincts. You cannot steer him." },
+    { kicker: "You are Whisper", text: "You are Whisper, a fairy no larger than a spark. When danger nears, you fly out and time slows to a single heartbeat." },
+    { kicker: "The whisper", text: "In that frozen moment you may offer him a different path. Nudge him, and he just might listen. Let us practice.", next: "Try it" },
+    { tutorial: true }
+  ];
+
+  // A low-stakes practice decision. Consequences are shown so you learn by doing,
+  // but the real run always starts fresh, so nothing here carries forward.
+  var TUTORIAL_EVENT = {
+    kind: "spikes",
+    prompt: "A patch of dream-thorns. Left alone, the Wanderer charges straight in. Whisper something different.",
+    aiChoice: 0,
+    tutorial: true,
+    options: [
+      { label: "Let him charge through", hint: "his instinct", health: -25, score: 6, msg: "He barrels through, bleeding but proud. Feel that? A whisper could have spared him." },
+      { label: "Nudge him to leap over", hint: "time it right", health: 0, score: 14, msg: "You flare bright and he vaults the thorns clean. That is your gift." },
+      { label: "Nudge him to find a gap", hint: "patience over pride", health: -5, score: 10, msg: "He slows and weaves through a hidden gap. Gentler, wiser." }
+    ]
+  };
   var state, hero, fairy, particles, floaters;
 
-  function reset() {
+  function resetWorld() {
     state = {
-      running: true,
+      running: false,
       paused: false,
-      mode: "run",          // "run" | "prompt" | "end"
+      mode: "start",        // "start" | "intro" | "introTutorial" | "introOutro" | "run" | "prompt" | "end"
       depth: 0,
       health: 100,
       score: 0,
@@ -310,6 +378,8 @@
       speed: 2.2,
       nextEventAt: 60,      // meters until first decision
       event: null,
+      obstacle: null,       // visible obstacle approaching before a decision
+      introStep: 0,
       choiceTimer: 0,
       choiceTimerMax: 6,    // seconds to decide
       resolving: 0,         // frames to show result before resuming
@@ -320,8 +390,123 @@
     fairy = { x: 150, y: GROUND - 40, tx: 150, ty: GROUND - 40, out: false, t: 0 };
     particles = [];
     floaters = [];
+    hideAllCards();
+    syncHud();
+  }
+
+  function hideAllCards() {
+    hideCard(startCard);
+    hideCard(introCard);
     hideCard(promptCard);
     hideCard(endCard);
+  }
+
+  function showOnly(el) {
+    hideAllCards();
+    showCard(el);
+  }
+
+  function hasSeenIntro() {
+    try { return localStorage.getItem("ww_seen_intro") === "1"; } catch (e) { return false; }
+  }
+  function markIntroSeen() {
+    try { localStorage.setItem("ww_seen_intro", "1"); } catch (e) {}
+  }
+
+  // ---- Start screen ---------------------------------------------------------
+  function showStart() {
+    resetWorld();
+    state.mode = "start";
+    var seen = hasSeenIntro();
+    startKicker.textContent = seen ? "Return to the dream" : "A dream begins";
+    startIntroBtn.textContent = seen ? "Replay intro" : "Watch intro";
+    showOnly(startCard);
+    setLog(seen ? "Whisper again." : "A fairy. A dreamer. Begin when you are ready.");
+  }
+
+  // ---- Intro flow -----------------------------------------------------------
+  function runIntro() {
+    resetWorld();
+    state.mode = "intro";
+    state.introStep = 0;
+    showIntroStep();
+  }
+
+  function showIntroStep() {
+    var step = INTRO[state.introStep];
+    if (!step) { finishIntro(); return; }
+    if (step.tutorial) { startTutorial(); return; }
+    state.mode = "intro";
+    introKicker.textContent = step.kicker;
+    introText.textContent = step.text;
+    introChoices.innerHTML = "";
+    introChoices.classList.add("hidden");
+    introTimerNote.classList.add("hidden");
+    introControls.classList.remove("hidden");
+    introSkipBtn.classList.remove("hidden");
+    introNextBtn.textContent = step.next || "Continue";
+    showOnly(introCard);
+    setLog("The dream unfolds\u2026");
+  }
+
+  function startTutorial() {
+    state.mode = "introTutorial";
+    state.event = TUTORIAL_EVENT;
+    state.obstacle = { kind: TUTORIAL_EVENT.kind, def: TUTORIAL_EVENT, x: hero.x + 96, y: GROUND, phase: "prompt", warn: 1 };
+    fairy.out = true;
+    fairy.tx = hero.x - 40;
+    fairy.ty = hero.y - 90;
+    introKicker.textContent = "Practice";
+    introText.textContent = TUTORIAL_EVENT.prompt;
+    introControls.classList.add("hidden");
+    introTimerNote.classList.remove("hidden");
+    introChoices.classList.remove("hidden");
+    introChoices.innerHTML = "";
+    TUTORIAL_EVENT.options.forEach(function (opt, idx) {
+      var b = document.createElement("button");
+      b.className = "choice";
+      b.innerHTML = opt.label + '<span class="hint">' + opt.hint + "</span>";
+      b.addEventListener("click", function () { resolveTutorial(idx); });
+      introChoices.appendChild(b);
+    });
+    showOnly(introCard);
+    setLog("Whisper flies out. Choose freely. No harm here.");
+  }
+
+  function resolveTutorial(idx) {
+    var opt = TUTORIAL_EVENT.options[idx];
+    // Show the consequence so the lesson lands, but never change the real run.
+    if (opt.health < 0) { burst(hero.x, hero.y - 30, "#ff6b8b", 16); addFloater(opt.health + " spirit", "#ff6b8b"); }
+    else if (opt.health > 0) { burst(hero.x, hero.y - 30, "#6bff9e", 14); addFloater("+" + opt.health + " spirit", "#6bff9e"); }
+    if (opt.score > 0) addFloater("+" + opt.score + " wonder", "#ffd27a");
+    if (state.obstacle) { burst(state.obstacle.x, GROUND - 20, "#7ef9ff", 12); state.obstacle = null; }
+    fairy.out = false;
+
+    var nudged = idx !== TUTORIAL_EVENT.aiChoice;
+    state.mode = "introOutro";
+    introKicker.textContent = "Well whispered";
+    introText.textContent = opt.msg + (nudged
+      ? " That was a nudge. In the real dream, those points and wounds are kept."
+      : " Or let his instinct lead. In the real dream, the outcome is kept.");
+    introChoices.classList.add("hidden");
+    introTimerNote.classList.add("hidden");
+    introControls.classList.remove("hidden");
+    introSkipBtn.classList.add("hidden");
+    introNextBtn.textContent = "Enter the dream";
+    setLog("Practice over. The real dream awaits.");
+  }
+
+  function finishIntro() {
+    markIntroSeen();
+    beginRun();
+  }
+
+  // ---- Begin the real run ---------------------------------------------------
+  function beginRun() {
+    resetWorld();
+    state.mode = "run";
+    state.running = true;
+    hideAllCards();
     setLog("The Wanderer sets off into the dream\u2026");
     syncHud();
   }
@@ -353,8 +538,16 @@
   }
 
   // ---- Decision flow --------------------------------------------------------
-  function triggerEvent() {
+  function spawnObstacle() {
     var def = EVENT_TYPES[Math.floor(Math.random() * EVENT_TYPES.length)];
+    state.obstacle = { kind: def.kind, def: def, x: W + 40, y: GROUND, phase: "approach", warn: 0 };
+    setLog("Something looms out of the dream ahead\u2026", "warn");
+  }
+
+  function triggerEvent() {
+    var ob = state.obstacle;
+    var def = ob ? ob.def : EVENT_TYPES[Math.floor(Math.random() * EVENT_TYPES.length)];
+    if (ob) ob.phase = "prompt";
     state.mode = "prompt";
     state.event = def;
     state.choiceTimer = state.choiceTimerMax;
@@ -405,6 +598,8 @@
     fairy.tx = hero.x - 20;
     fairy.ty = hero.y - 44;
 
+    if (state.obstacle) { burst(state.obstacle.x, GROUND - 20, "#7ef9ff", 12); state.obstacle = null; }
+
     state.event = null;
     state.mode = "run";
     state.resolving = 40;
@@ -435,7 +630,7 @@
   function update(dt) {
     // Fairy easing (always animate so she feels alive).
     fairy.t += dt;
-    if (state.mode !== "prompt" && state.mode !== "end") {
+    if (state.mode !== "prompt" && state.mode !== "introTutorial" && state.mode !== "end") {
       // hover beside the hero
       fairy.tx = hero.x - 20 + Math.cos(fairy.t * 2) * 6;
       fairy.ty = hero.y - 44 + Math.sin(fairy.t * 3) * 6;
@@ -476,8 +671,19 @@
 
     if (state.depth >= state.goal) { endGame(true); return; }
 
-    if (state.depth >= state.nextEventAt && state.resolving <= 0) {
-      triggerEvent();
+    // Spawn a visible obstacle that approaches before we ever ask for a decision.
+    if (!state.obstacle && state.resolving <= 0 && state.depth >= state.nextEventAt) {
+      spawnObstacle();
+    }
+    // Let the obstacle roll in from the right; time slows once it reaches him.
+    if (state.obstacle && state.obstacle.phase === "approach") {
+      var ob = state.obstacle;
+      ob.x -= 300 * dt;
+      ob.warn = Math.min(1, ob.warn + dt * 1.6);
+      if (ob.x <= hero.x + 64) {
+        ob.x = hero.x + 64;
+        triggerEvent();
+      }
     }
 
     syncHud();
@@ -647,10 +853,103 @@
     ctx.fillText("spirit", x, y + 22);
   }
 
+  function drawObstacleBody(kind, x) {
+    var gTop = GROUND + 14;
+    if (kind === "spikes") {
+      ctx.fillStyle = "#ff6b8b";
+      ctx.strokeStyle = "#b3324f";
+      ctx.lineWidth = 2;
+      for (var i = -2; i <= 2; i++) {
+        var sx = x + i * 16;
+        ctx.beginPath();
+        ctx.moveTo(sx - 9, gTop);
+        ctx.lineTo(sx, GROUND - 36);
+        ctx.lineTo(sx + 9, gTop);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+      }
+    } else if (kind === "fork") {
+      ctx.strokeStyle = "#a9b0e0"; ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.moveTo(x, gTop); ctx.lineTo(x, GROUND - 30); ctx.stroke();
+      ctx.strokeStyle = "#5566aa"; ctx.lineWidth = 5;
+      ctx.beginPath(); ctx.moveTo(x, GROUND - 30); ctx.lineTo(x - 30, GROUND - 50); ctx.stroke();
+      ctx.strokeStyle = "#ffd27a";
+      ctx.beginPath(); ctx.moveTo(x, GROUND - 30); ctx.lineTo(x + 30, GROUND - 44); ctx.stroke();
+      ctx.fillStyle = "#1a1030";
+      ctx.beginPath(); ctx.arc(x - 34, GROUND - 52, 8, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#ffd27a";
+      ctx.beginPath(); ctx.arc(x + 34, GROUND - 46, 8, 0, Math.PI * 2); ctx.fill();
+    } else if (kind === "guardian") {
+      ctx.fillStyle = "#5b6b8c"; ctx.strokeStyle = "#2c3550"; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.rect(x - 20, GROUND - 56, 40, 70); ctx.fill(); ctx.stroke();
+      ctx.beginPath(); ctx.rect(x - 14, GROUND - 80, 28, 26); ctx.fill(); ctx.stroke();
+      ctx.strokeStyle = "#0b0f2c"; ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(x - 9, GROUND - 68); ctx.lineTo(x - 3, GROUND - 68);
+      ctx.moveTo(x + 3, GROUND - 68); ctx.lineTo(x + 9, GROUND - 68);
+      ctx.stroke();
+    } else if (kind === "chasm") {
+      ctx.fillStyle = "#05070f";
+      ctx.beginPath();
+      ctx.moveTo(x - 36, gTop);
+      ctx.lineTo(x - 20, GROUND + 40);
+      ctx.lineTo(x, GROUND + 66);
+      ctx.lineTo(x + 20, GROUND + 40);
+      ctx.lineTo(x + 36, gTop);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = "rgba(126,249,255,0.45)"; ctx.lineWidth = 2; ctx.stroke();
+    } else if (kind === "mirror") {
+      var g = ctx.createLinearGradient(x - 16, 0, x + 16, 0);
+      g.addColorStop(0, "rgba(126,249,255,0.15)");
+      g.addColorStop(0.5, "rgba(234,255,255,0.75)");
+      g.addColorStop(1, "rgba(126,249,255,0.15)");
+      ctx.fillStyle = g; ctx.strokeStyle = "#eaffff"; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.rect(x - 16, GROUND - 72, 32, 86); ctx.fill(); ctx.stroke();
+    }
+  }
+
+  function drawObstacle(ob) {
+    var x = ob.x;
+    var pulse = 0.5 + 0.5 * Math.sin(fairy.t * 5);
+
+    ctx.save();
+    // Danger telegraph glow while the obstacle is still approaching.
+    if (ob.phase === "approach") {
+      ctx.globalAlpha = 0.18 + 0.28 * pulse;
+      ctx.fillStyle = "#ff6b8b";
+      ctx.beginPath();
+      ctx.ellipse(x, GROUND - 26, 48 + pulse * 10, 62 + pulse * 10, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+
+    drawObstacleBody(ob.kind, x);
+
+    // Warning marker + label so the hazard reads clearly before deciding.
+    var my = GROUND - 100;
+    ctx.globalAlpha = ob.phase === "approach" ? (0.65 + 0.35 * pulse) : 1;
+    ctx.fillStyle = "#ffd27a"; ctx.strokeStyle = "#3a2c00"; ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(x, my - 13); ctx.lineTo(x - 12, my + 9); ctx.lineTo(x + 12, my + 9);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = "#3a2c00";
+    ctx.font = "bold 14px Segoe UI, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("!", x, my + 7);
+    ctx.fillStyle = "#ffd27a";
+    ctx.font = "bold 12px Segoe UI, sans-serif";
+    ctx.fillText(OBST_LABEL[ob.kind] || "Danger", x, my + 26);
+    ctx.globalAlpha = 1;
+    ctx.restore();
+  }
+
   function render() {
     ctx.clearRect(0, 0, W, H);
     drawBackground();
     if (state) {
+      if (state.obstacle) drawObstacle(state.obstacle);
       drawHero();
       drawFairy();
       drawParticles();
@@ -661,6 +960,7 @@
         // dim the world to signal "time slows"
         ctx.fillStyle = "rgba(6, 8, 26, 0.45)";
         ctx.fillRect(0, 0, W, H);
+        if (state.obstacle) drawObstacle(state.obstacle); // keep the hazard readable
         drawFairy(); // fairy stays bright above the dim
       }
     }
@@ -671,34 +971,47 @@
   function loop(now) {
     var dt = Math.min(0.05, (now - last) / 1000);
     last = now;
-    if (state && state.running && !state.paused) update(dt);
-    else {
-      // keep fairy/particles alive on end screen
-      if (state && !state.paused) update(0); // no-op-ish, keeps HUD stable
-    }
+    if (state && !state.paused) update(dt);
     render();
     requestAnimationFrame(loop);
   }
 
   // ---- Controls -------------------------------------------------------------
-  document.getElementById("reset-btn").addEventListener("click", reset);
-  document.getElementById("restart-btn").addEventListener("click", reset);
+  document.getElementById("reset-btn").addEventListener("click", showStart);
+  document.getElementById("restart-btn").addEventListener("click", showStart);
+
+  startBeginBtn.addEventListener("click", beginRun);
+  startIntroBtn.addEventListener("click", runIntro);
+  introNextBtn.addEventListener("click", function () {
+    if (state.mode === "introOutro") { finishIntro(); return; }
+    state.introStep++;
+    showIntroStep();
+  });
+  introSkipBtn.addEventListener("click", function () { markIntroSeen(); beginRun(); });
+
   pauseBtn.addEventListener("click", function () {
-    if (!state || state.mode === "end") return;
+    if (!state || (state.mode !== "run" && state.mode !== "prompt")) return;
     state.paused = !state.paused;
     pauseBtn.textContent = state.paused ? "Resume" : "Pause";
     setLog(state.paused ? "Paused." : "The dream continues\u2026");
   });
 
-  // Keyboard: 1/2/3 to whisper a choice quickly.
+  // Keyboard: 1/2/3 to whisper a choice quickly (also during the practice run).
   document.addEventListener("keydown", function (e) {
-    if (state && state.mode === "prompt") {
-      var n = parseInt(e.key, 10);
+    if (!state) return;
+    var n = parseInt(e.key, 10);
+    if (isNaN(n)) return;
+    if (state.mode === "prompt") {
       if (n >= 1 && n <= state.event.options.length) resolveChoice(n - 1, true);
+    } else if (state.mode === "introTutorial") {
+      if (n >= 1 && n <= TUTORIAL_EVENT.options.length) resolveTutorial(n - 1);
     }
   });
 
-  reset();
+  // First-ever visit plays the intro automatically; afterward it is optional.
+  resetWorld();
+  if (hasSeenIntro()) showStart();
+  else runIntro();
   requestAnimationFrame(loop);
 })();
 </script>
